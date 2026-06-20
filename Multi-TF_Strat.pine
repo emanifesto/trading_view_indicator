@@ -1,0 +1,25 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DamiSneeze
+
+//@version=6
+indicator("The Method")
+
+// Settings
+// All customizability and inputs that this indicator will use
+
+//Group - Fair Value Gap (FVG)
+bool fvg_multiTF = input.bool(true, "FVG Multi TimeFrame Display", 
+"""Determines if Fair Value Gaps are pulled from multiple timeframes
+     and displayed in an overlay""", 'fvg', 'Fair Value Gaps')
+
+
+
+// Types
+// All types and structs used to store/display information
+
+//type fvg
+plot(close)
+
+//Implement liquidity pools using RSI of close of hlc(c)
+
+
