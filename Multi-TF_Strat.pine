@@ -29,6 +29,7 @@ enum status
 type fvg
     box display
     line midline
+    float mid_price
     float terminal_price
     int start
     sentiment direction
@@ -41,24 +42,41 @@ type fvg
 
 
 // Fair Value Gaps
-var array<fvg> fvgs_bull = na
-var array<fvg> fvgs_bear = na
+var array<fvg> fvgs_bull = array.new<fvg>()
+var array<fvg> fvgs_bear = array.new<fvg>()
 
 fvg FVG = na
 if high[3] < low[1]
     int start = bar_index - 2
-    chart.point top = chart.point.from_index(start, high[3])
-    chart.point bottom = chart.point.from_index(start, low[1])
+    chart.point top = chart.point.from_index(start, low[1])
+    chart.point bottom = chart.point.from_index(start, high[3])
     float middle = math.avg(top.price, bottom.price)
 
-    chart.point midline1 = chart.point.from_index(start, middle)
-    chart.point midline2 = chart.point.from_index(bar_index, middle)
+    chart.point midpoint1 = chart.point.from_index(start, middle)
+    chart.point midpoint2 = chart.point.from_index(bar_index, middle)
 
     box bx = box.new(top, bottom, bgcolor=color.new(color.blue, 70), extend = extend.right)
-    line ln = line.new(midline1, midline2, color=color.blue, extend=extend.right)
+    line ln = line.new(midpoint1, midpoint2, color=color.blue, extend=extend.right)
 
-    FVG := fvg.new(bx, ln, bottom.price, start, sentiment.BULL, status.OPEN)
+    FVG := fvg.new(bx, ln, middle, bottom.price, start, sentiment.BULL, status.OPEN)
     fvgs_bull.unshift(FVG)
-    
 
+
+
+if fvgs_bull.size() > 0
+    int num_closed = 0  
+    for i in fvgs_bull
+        if (barstate.ishistory or barstate.isconfirmed) and close < i.terminal_price
+            num_closed += 1
+            box.delete(i.display)
+            line.delete(i.midline)
+            if not na(i.bounce_line)
+                line.delete(i.bounce_line)
+        else if low > i.mid_price
+            if num_closed > 0
+                for j = 0 to num_closed - 1 by 1
+                    array.shift(fvgs_bull)
+            break
+
+//sort fvgs array by midline not terminal_price for bug fix foresight
 //Implement liquidity pools using RSI of close of hlc(c)
