@@ -4,28 +4,48 @@
 //@version=6
 indicator("The Method", overlay = true)
 
-// Settings
+// SETTINGS
 // All customizability and inputs that this indicator will use
 
 //Group - Fair Value Gap (FVG)
-bool fvg_multiTF = input.bool(true, "FVG Multi TimeFrame Display", 
-"""Determines if Fair Value Gaps are pulled from multiple timeframes
-     and displayed in an overlay""", 'fvg', 'Fair Value Gaps')
+bool fvg_multiTF = input.bool(true, "FVG Multi TimeFrame Display Toggle", 
+"""Determines if Fair Value Gaps are pulled from multiple timeframes and displayed in an overlay.""",
+group='Fair Value Gaps')
 
 
-
-// Types
+// TYPES
 // All types and enums used to store/display information
 
+
+//@enum An enumeration of the bullish or bearish sentiment of a
+// liquidity zone. (FVGs, Liquidity Pools, etc.)
+//@field BULL  Specifies a liquidity zone where buyers are likely to make a move.
+//@field BEAR  Specifies a liquidity zone where sellers are likely to make a move.
 enum sentiment
     BULL
     BEAR
 
+//@enum An enumeration of the status of zones of liquidity
+// that price can react of off. (FVGs, Liquidity Pools, etc.)
+//@field OPEN   Specifies a zone that price has not disrespected.
+//@field MITIGATED   Specifies a zone that price has gone more than 50% through.
+//@field CLOSED  Specifies a zone that price has closed beyond.
 enum status
-    MITIGATED
     OPEN
+    MITIGATED
     CLOSED
 
+//@type A custom object that holds information on a Fair Value Gap.
+//@field display  Stores the box object that is displayed on the chart.
+//@field midline  Stores the line object that displays the middle of the FVG
+//@field mid_price  Stores the middle price of the FVG.
+//@field terminal_price  Stores the point that prices must close beyond to
+// nullify the FVG. The high of a bearish FVG and the low of a bullish FVG.
+//@field start  Stores the bar_index that a FVG starts from.
+//@field direction  Stores an enumeration value for the sentiment of bullish or bearish
+//@field fvg_status  Stores an enumeration value for whether the FVG is open, mitigated, or closed.
+//@field bounce_line Stores a line object representing where price must close
+// beyond in order to invalidate a FVG. Only appears when fvg_status == status.MITIGATED. 
 type fvg
     box display
     line midline
@@ -37,42 +57,53 @@ type fvg
     line bounce_line
 
 
-// Runtime
-// Line of logic that is run for every bar execution
+//FUNCTIONS
+// Reusable code that will be repeatedly called on
 
 
-// Fair Value Gaps
-var array<fvg> fvgs_bull = array.new<fvg>()
-var array<fvg> fvgs_bear = array.new<fvg>()
+detect_fvgs(array<fvg> bull_arr, array<fvg> bear_arr) =>
+    fvg FVG = na
+    if high[3] < low[1]
+        int start = bar_index - 2
+        chart.point top = chart.point.from_index(start, low[1])
+        chart.point bottom = chart.point.from_index(start, high[3])
+        float middle = math.avg(top.price, bottom.price)
 
-fvg FVG = na
-if high[3] < low[1]
-    int start = bar_index - 2
-    chart.point top = chart.point.from_index(start, low[1])
-    chart.point bottom = chart.point.from_index(start, high[3])
-    float middle = math.avg(top.price, bottom.price)
+        chart.point midpoint1 = chart.point.from_index(start, middle)
+        chart.point midpoint2 = chart.point.from_index(bar_index, middle)
 
-    chart.point midpoint1 = chart.point.from_index(start, middle)
-    chart.point midpoint2 = chart.point.from_index(bar_index, middle)
+        box bx = box.new(top, bottom, bgcolor=color.new(color.blue, 85), extend = extend.right)
+        line ln = line.new(midpoint1, midpoint2, color=color.blue, extend=extend.right)
 
-    box bx = box.new(top, bottom, bgcolor=color.new(color.blue, 70), extend = extend.right)
-    line ln = line.new(midpoint1, midpoint2, color=color.blue, extend=extend.right)
+        FVG := fvg.new(bx, ln, middle, bottom.price, start, sentiment.BULL, status.OPEN)
+        bull_arr.unshift(FVG)
 
-    FVG := fvg.new(bx, ln, middle, bottom.price, start, sentiment.BULL, status.OPEN)
-    fvgs_bull.unshift(FVG)
+    else if low[3] > high[1]
+        int start = bar_index - 2
+        chart.point top = chart.point.from_index(start, low[3])
+        chart.point bottom = chart.point.from_index(start, high[1])
+        float middle = math.avg(top.price, bottom.price)
 
+        chart.point midpoint1 = chart.point.from_index(start, middle)
+        chart.point midpoint2 = chart.point.from_index(bar_index, middle)
 
+        box bx = box.new(top, bottom, bgcolor=color.new(color.orange, 85), extend = extend.right)
+        line ln = line.new(midpoint1, midpoint2, color=color.orange, extend=extend.right)
 
-if fvgs_bull.size() > 0
-    int num_closed = 0  
-    for i in fvgs_bull
+        FVG := fvg.new(bx, ln, middle, top.price, start, sentiment.BEAR, status.OPEN)
+        bear_arr.unshift(FVG)
+
+update_bullish_fvgs(array<fvg> bull_arr) =>
+    int num_closed = 0 
+    for i in bull_arr
         if (barstate.ishistory or barstate.isconfirmed) and close < i.terminal_price
             box.delete(i.display)
             line.delete(i.midline)
             if not na(i.bounce_line)
                 line.delete(i.bounce_line)
             num_closed += 1
-        else if low < i.mid_price and i.fvg_status != status.MITIGATED
+            continue
+        if low < i.mid_price and i.fvg_status != status.MITIGATED
             box bx = i.display
             line ln = i.midline
             box.set_right(bx, bar_index)
@@ -83,14 +114,62 @@ if fvgs_bull.size() > 0
             line.set_color(ln, color.black)
             chart.point bouncepoint1 = chart.point.from_index(i.start, i.terminal_price)
             chart.point bouncepoint2 = chart.point.from_index(bar_index, i.terminal_price)
-            i.bounce_line := line.new(bouncepoint1, bouncepoint2, extend=extend.right, color=color.new(color.blue, 70), width=3)
+            i.bounce_line := line.new(bouncepoint1, bouncepoint2, extend=extend.right, color=color.new(color.blue, 50), width=3)
             i.fvg_status := status.MITIGATED
-        else if low > i.mid_price
+            continue
+        if low > i.mid_price
             if num_closed > 0
                 for j = 0 to num_closed - 1 by 1
-                    array.shift(fvgs_bull)
+                    array.shift(bull_arr)
             break
 
+update_bearish_fvgs(bear_arr) =>
+    int num_closed = 0  
+    for i in bear_arr
+        if (barstate.ishistory or barstate.isconfirmed) and close > i.terminal_price
+            box.delete(i.display)
+            line.delete(i.midline)
+            if not na(i.bounce_line)
+                line.delete(i.bounce_line)
+            num_closed += 1
+            continue
+        if high > i.mid_price and i.fvg_status != status.MITIGATED
+            box bx = i.display
+            line ln = i.midline
+            box.set_right(bx, bar_index)
+            box.set_extend(bx, extend.none)
+            box.set_bgcolor(bx, color.new(color.silver, 50))
+            line.set_x2(ln, bar_index)
+            line.set_extend(ln, extend.none)
+            line.set_color(ln, color.black)
+            chart.point bouncepoint1 = chart.point.from_index(i.start, i.terminal_price)
+            chart.point bouncepoint2 = chart.point.from_index(bar_index, i.terminal_price)
+            i.bounce_line := line.new(bouncepoint1, bouncepoint2, extend=extend.right, color=color.new(color.blue, 50), width=3)
+            i.fvg_status := status.MITIGATED
+            continue
+        if high < i.mid_price
+            if num_closed > 0
+                for j = 0 to num_closed - 1 by 1
+                    array.shift(bear_arr)
+            break
+
+
+// RUNTIME
+// Line of logic that is run for every bar execution
+
+
+// Fair Value Gaps
+var array<fvg> fvgs_bull = array.new<fvg>()
+var array<fvg> fvgs_bear = array.new<fvg>()
+
+detect_fvgs(fvgs_bull, fvgs_bear)
+
+if fvgs_bull.size() > 0
+    update_bullish_fvgs(fvgs_bull)
+
+if fvgs_bear.size() > 0
+    update_bearish_fvgs(fvgs_bear)
+    
 //sort fvgs array by midline not terminal_price for bug fix foresight
 //current colors are placeholders
 //Implement liquidity pools using RSI of close of hlc(c)
