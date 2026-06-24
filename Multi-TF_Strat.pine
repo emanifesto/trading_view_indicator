@@ -67,11 +67,24 @@ if fvgs_bull.size() > 0
     int num_closed = 0  
     for i in fvgs_bull
         if (barstate.ishistory or barstate.isconfirmed) and close < i.terminal_price
-            num_closed += 1
             box.delete(i.display)
             line.delete(i.midline)
             if not na(i.bounce_line)
                 line.delete(i.bounce_line)
+            num_closed += 1
+        else if low < i.mid_price and i.fvg_status != status.MITIGATED
+            box bx = i.display
+            line ln = i.midline
+            box.set_right(bx, bar_index)
+            box.set_extend(bx, extend.none)
+            box.set_bgcolor(bx, color.new(color.silver, 50))
+            line.set_x2(ln, bar_index)
+            line.set_extend(ln, extend.none)
+            line.set_color(ln, color.black)
+            chart.point bouncepoint1 = chart.point.from_index(i.start, i.terminal_price)
+            chart.point bouncepoint2 = chart.point.from_index(bar_index, i.terminal_price)
+            i.bounce_line := line.new(bouncepoint1, bouncepoint2, extend=extend.right, color=color.new(color.blue, 70), width=3)
+            i.fvg_status := status.MITIGATED
         else if low > i.mid_price
             if num_closed > 0
                 for j = 0 to num_closed - 1 by 1
@@ -79,4 +92,5 @@ if fvgs_bull.size() > 0
             break
 
 //sort fvgs array by midline not terminal_price for bug fix foresight
+//current colors are placeholders
 //Implement liquidity pools using RSI of close of hlc(c)
