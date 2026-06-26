@@ -125,12 +125,12 @@ update_bullish_fvgs(array<fvg> bull_arr) =>
             i.fvg_status := status.MITIGATED
             continue
         if low > i.mid_price
-            if num_closed > 0
-                for j = 0 to num_closed - 1 by 1
-                    array.shift(bull_arr)
             break
+    if num_closed > 0
+        for j = 0 to num_closed - 1 by 1
+            array.shift(bull_arr)
 
-update_bearish_fvgs(bear_arr) =>
+update_bearish_fvgs(array<fvg> bear_arr) =>
     int num_closed = 0  
     for i in bear_arr
         if (barstate.ishistory or barstate.isconfirmed) and close > i.terminal_price
@@ -155,10 +155,10 @@ update_bearish_fvgs(bear_arr) =>
             i.fvg_status := status.MITIGATED
             continue
         if high < i.mid_price
-            if num_closed > 0
-                for j = 0 to num_closed - 1 by 1
-                    array.shift(bear_arr)
             break
+    if num_closed > 0
+        for j = 0 to num_closed - 1 by 1
+            array.shift(bear_arr)
 
 
 // RUNTIME
@@ -176,7 +176,7 @@ if fvgs_bull.size() > 0
 
 if fvgs_bear.size() > 0
     update_bearish_fvgs(fvgs_bear)
-    
+
 //sort fvgs array by midline not terminal_price for bug fix foresight
 //current colors are placeholders
 //Implement liquidity pools using RSI of close of hlc(c)
