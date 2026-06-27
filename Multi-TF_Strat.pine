@@ -101,64 +101,67 @@ detect_fvgs(array<fvg> bull_arr, array<fvg> bear_arr) =>
         bear_arr.unshift(FVG)
 
 update_bullish_fvgs(array<fvg> bull_arr) =>
-    int num_closed = 0 
-    for i in bull_arr
-        if (barstate.ishistory or barstate.isconfirmed) and close < i.terminal_price
-            box.delete(i.display)
-            line.delete(i.midline)
-            if not na(i.bounce_line)
-                line.delete(i.bounce_line)
-            num_closed += 1
+    array<int> closed_idxs = array.new<int>()
+    for [idx, FVG] in bull_arr
+        if (barstate.ishistory or barstate.isconfirmed) and close < FVG.terminal_price
+            box.delete(FVG.display)
+            line.delete(FVG.midline)
+            if not na(FVG.bounce_line)
+                line.delete(FVG.bounce_line)
+            array.unshift(closed_idxs, idx)
             continue
-        if low < i.mid_price and i.fvg_status != status.MITIGATED
-            box bx = i.display
-            line ln = i.midline
+        if low < FVG.mid_price and FVG.fvg_status != status.MITIGATED
+            box bx = FVG.display
+            line ln = FVG.midline
             box.set_right(bx, bar_index)
             box.set_extend(bx, extend.none)
             box.set_bgcolor(bx, color.new(color.silver, 50))
             line.set_x2(ln, bar_index)
             line.set_extend(ln, extend.none)
             line.set_color(ln, color.black)
-            chart.point bouncepoint1 = chart.point.from_index(i.start, i.terminal_price)
-            chart.point bouncepoint2 = chart.point.from_index(bar_index, i.terminal_price)
-            i.bounce_line := line.new(bouncepoint1, bouncepoint2, extend=extend.right, color=color.new(color.blue, 50), width=3)
-            i.fvg_status := status.MITIGATED
+            chart.point bouncepoint1 = chart.point.from_index(FVG.start, FVG.terminal_price)
+            chart.point bouncepoint2 = chart.point.from_index(bar_index, FVG.terminal_price)
+            FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, extend=extend.right, color=color.new(color.blue, 50), width=3)
+            FVG.fvg_status := status.MITIGATED
             continue
-        if low > i.mid_price
+        if low > FVG.mid_price
             break
-    if num_closed > 0
-        for j = 0 to num_closed - 1 by 1
-            array.shift(bull_arr)
+    
+    // Going through FVG stack and adding the closed indexes as their own stack
+    // to prohibit a deleted index from changing the location of the next 
+    // FVG(s) to delete
+    for idx in closed_idxs
+        array.remove(bull_arr, idx)
 
 update_bearish_fvgs(array<fvg> bear_arr) =>
-    int num_closed = 0  
-    for i in bear_arr
-        if (barstate.ishistory or barstate.isconfirmed) and close > i.terminal_price
-            box.delete(i.display)
-            line.delete(i.midline)
-            if not na(i.bounce_line)
-                line.delete(i.bounce_line)
-            num_closed += 1
+    array<int> closed_idxs = array.new<int>()
+    for [idx, FVG] in bear_arr
+        if (barstate.ishistory or barstate.isconfirmed) and close > FVG.terminal_price
+            box.delete(FVG.display)
+            line.delete(FVG.midline)
+            if not na(FVG.bounce_line)
+                line.delete(FVG.bounce_line)
+            array.unshift(closed_idxs, idx)
             continue
-        if high > i.mid_price and i.fvg_status != status.MITIGATED
-            box bx = i.display
-            line ln = i.midline
+        if high > FVG.mid_price and FVG.fvg_status != status.MITIGATED
+            box bx = FVG.display
+            line ln = FVG.midline
             box.set_right(bx, bar_index)
             box.set_extend(bx, extend.none)
             box.set_bgcolor(bx, color.new(color.silver, 50))
             line.set_x2(ln, bar_index)
             line.set_extend(ln, extend.none)
             line.set_color(ln, color.black)
-            chart.point bouncepoint1 = chart.point.from_index(i.start, i.terminal_price)
-            chart.point bouncepoint2 = chart.point.from_index(bar_index, i.terminal_price)
-            i.bounce_line := line.new(bouncepoint1, bouncepoint2, extend=extend.right, color=color.new(color.orange, 50), width=3)
-            i.fvg_status := status.MITIGATED
+            chart.point bouncepoint1 = chart.point.from_index(FVG.start, FVG.terminal_price)
+            chart.point bouncepoint2 = chart.point.from_index(bar_index, FVG.terminal_price)
+            FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, extend=extend.right, color=color.new(color.orange, 50), width=3)
+            FVG.fvg_status := status.MITIGATED
             continue
-        if high < i.mid_price
+        if high < FVG.mid_price
             break
-    if num_closed > 0
-        for j = 0 to num_closed - 1 by 1
-            array.shift(bear_arr)
+    
+    for idx in closed_idxs
+        array.remove(bear_arr, idx)
 
 
 // RUNTIME
