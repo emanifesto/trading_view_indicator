@@ -40,24 +40,27 @@ enum status
     CLOSED
 
 //@type A custom object that holds information on a Fair Value Gap.
-//@field display  Stores the box object that is displayed on the chart.
-//@field midline  Stores the line object that displays the middle of the FVG
-//@field mid_price  Stores the middle price of the FVG.
-//@field terminal_price  Stores the point that prices must close beyond to
-// nullify the FVG. The high of a bearish FVG and the low of a bullish FVG.
+//@field top  Stores the top price of the FVG. The point price must close beyond to 
+// invalidate a bearish FVG.
+//@field bottom  Stores the bottom price of the FVG. The point price must close beyond to 
+// invalidate a bullish FVG.
+//@field middle  Stores the middle price of the FVG.
 //@field start  Stores the bar_index that a FVG starts from.
-//@field direction  Stores an enumeration value for the sentiment of bullish or bearish
+//@field direction  Stores an enumeration value for the sentiment of bullish or bearish.
 //@field fvg_status  Stores an enumeration value for whether the FVG is open, mitigated, or closed.
+//@field display  Stores the box object that is displayed on the chart.
+//@field midline  Stores the line object that displays the middle of the FVG.
 //@field bounce_line Stores a line object representing where price must close
 // beyond in order to invalidate a FVG. Only appears when fvg_status == status.MITIGATED. 
 type fvg
-    box display
-    line midline
-    float mid_price
-    float terminal_price
+    float top
+    float bottom
+    float middle
     int start
     sentiment direction
     status fvg_status
+    box display
+    line midline
     line bounce_line
 
 
@@ -68,49 +71,54 @@ type fvg
 // the bar from three candles ago (low[3]/high[3]); creating
 // a FVG object after it identifies whether a gap exists
 // between them.
-detect_fvgs(array<fvg> bull_arr, array<fvg> bear_arr) =>
+detect_fvg() =>
     fvg FVG = na
     if high[3] < low[1] and (low[1] - high[3] > fvg_min_size)
         int start = bar_index - 2
-        chart.point top = chart.point.from_index(start, low[1])
-        chart.point bottom = chart.point.from_index(start, high[3])
-        float middle = math.avg(top.price, bottom.price)
+        float top = low[1]
+        float bottom = high[3]
+        float middle = math.avg(top, bottom)
 
-        chart.point midpoint1 = chart.point.from_index(start, middle)
-        chart.point midpoint2 = chart.point.from_index(bar_index, middle)
-
-        box bx = box.new(top, bottom, border_width=0, bgcolor=color.new(color.blue, 85), extend = extend.right)
-        line ln = line.new(midpoint1, midpoint2, color=color.blue, extend=extend.right)
-
-        FVG := fvg.new(bx, ln, middle, bottom.price, start, sentiment.BULL, status.OPEN)
-        bull_arr.unshift(FVG)
+        FVG := fvg.new(top, bottom, middle, start, sentiment.BULL, status.OPEN)
 
     else if low[3] > high[1] and (low[3] - high[1] > fvg_min_size)
         int start = bar_index - 2
-        chart.point top = chart.point.from_index(start, low[3])
-        chart.point bottom = chart.point.from_index(start, high[1])
-        float middle = math.avg(top.price, bottom.price)
+        float top = low[3]
+        float bottom = high[1]
+        float middle = math.avg(top, bottom)
 
-        chart.point midpoint1 = chart.point.from_index(start, middle)
-        chart.point midpoint2 = chart.point.from_index(bar_index, middle)
+        FVG := fvg.new(top, bottom, middle, start, sentiment.BEAR, status.OPEN)
 
-        box bx = box.new(top, bottom, border_width=0, bgcolor=color.new(color.orange, 85), extend = extend.right)
-        line ln = line.new(midpoint1, midpoint2, color=color.orange, extend=extend.right)
+    FVG
 
-        FVG := fvg.new(bx, ln, middle, top.price, start, sentiment.BEAR, status.OPEN)
+plot_fvg(fvg FVG, array<fvg> bull_arr, array<fvg> bear_arr) => 
+    int start = FVG.start
+    chart.point top = chart.point.from_index(start, FVG.top)
+    chart.point bottom = chart.point.from_index(start, FVG.bottom)
+    chart.point midpoint1 = chart.point.from_index(start, FVG.middle)
+    chart.point midpoint2 = chart.point.from_index(bar_index, FVG.middle)
+
+    if FVG.direction == sentiment.BULL
+        FVG.display := box.new(top, bottom, border_width=0, bgcolor=color.new(color.blue, 85), extend=extend.right)
+        FVG.midline := line.new(midpoint1, midpoint2, color=color.blue, extend=extend.right)
+        bull_arr.unshift(FVG)
+
+    else if FVG.direction == sentiment.BEAR
+        FVG.display := box.new(top, bottom, border_width=0, bgcolor=color.new(color.orange, 85), extend=extend.right)
+        FVG.midline := line.new(midpoint1, midpoint2, color=color.orange, extend=extend.right)
         bear_arr.unshift(FVG)
 
 update_bullish_fvgs(array<fvg> bull_arr) =>
     array<int> closed_idxs = array.new<int>()
     for [idx, FVG] in bull_arr
-        if (barstate.ishistory or barstate.isconfirmed) and close < FVG.terminal_price
+        if (barstate.ishistory or barstate.isconfirmed) and close < FVG.bottom
             box.delete(FVG.display)
             line.delete(FVG.midline)
             if not na(FVG.bounce_line)
                 line.delete(FVG.bounce_line)
             array.unshift(closed_idxs, idx)
             continue
-        if low < FVG.mid_price and FVG.fvg_status != status.MITIGATED
+        if low < FVG.middle and FVG.fvg_status != status.MITIGATED
             box bx = FVG.display
             line ln = FVG.midline
             box.set_right(bx, bar_index)
@@ -119,12 +127,12 @@ update_bullish_fvgs(array<fvg> bull_arr) =>
             line.set_x2(ln, bar_index)
             line.set_extend(ln, extend.none)
             line.set_color(ln, color.black)
-            chart.point bouncepoint1 = chart.point.from_index(FVG.start, FVG.terminal_price)
-            chart.point bouncepoint2 = chart.point.from_index(bar_index, FVG.terminal_price)
+            chart.point bouncepoint1 = chart.point.from_index(FVG.start, FVG.bottom)
+            chart.point bouncepoint2 = chart.point.from_index(bar_index, FVG.bottom)
             FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, extend=extend.right, color=color.new(color.blue, 50), width=3)
             FVG.fvg_status := status.MITIGATED
             continue
-        if low > FVG.mid_price
+        if low > FVG.middle
             break
     
     // Going through FVG stack and adding the closed indexes as their own stack
@@ -136,14 +144,14 @@ update_bullish_fvgs(array<fvg> bull_arr) =>
 update_bearish_fvgs(array<fvg> bear_arr) =>
     array<int> closed_idxs = array.new<int>()
     for [idx, FVG] in bear_arr
-        if (barstate.ishistory or barstate.isconfirmed) and close > FVG.terminal_price
+        if (barstate.ishistory or barstate.isconfirmed) and close > FVG.top
             box.delete(FVG.display)
             line.delete(FVG.midline)
             if not na(FVG.bounce_line)
                 line.delete(FVG.bounce_line)
             array.unshift(closed_idxs, idx)
             continue
-        if high > FVG.mid_price and FVG.fvg_status != status.MITIGATED
+        if high > FVG.middle and FVG.fvg_status != status.MITIGATED
             box bx = FVG.display
             line ln = FVG.midline
             box.set_right(bx, bar_index)
@@ -152,12 +160,12 @@ update_bearish_fvgs(array<fvg> bear_arr) =>
             line.set_x2(ln, bar_index)
             line.set_extend(ln, extend.none)
             line.set_color(ln, color.black)
-            chart.point bouncepoint1 = chart.point.from_index(FVG.start, FVG.terminal_price)
-            chart.point bouncepoint2 = chart.point.from_index(bar_index, FVG.terminal_price)
+            chart.point bouncepoint1 = chart.point.from_index(FVG.start, FVG.top)
+            chart.point bouncepoint2 = chart.point.from_index(bar_index, FVG.top)
             FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, extend=extend.right, color=color.new(color.orange, 50), width=3)
             FVG.fvg_status := status.MITIGATED
             continue
-        if high < FVG.mid_price
+        if high < FVG.middle
             break
     
     for idx in closed_idxs
@@ -172,15 +180,21 @@ update_bearish_fvgs(array<fvg> bear_arr) =>
 var array<fvg> fvgs_bull = array.new<fvg>()
 var array<fvg> fvgs_bear = array.new<fvg>()
 
-detect_fvgs(fvgs_bull, fvgs_bear)
+// if not fvg_multiTF
+fvg FVG = detect_fvg()
+if not na(FVG)
+    plot_fvg(FVG, fvgs_bull, fvgs_bear)
 
 if fvgs_bull.size() > 0
     update_bullish_fvgs(fvgs_bull)
 
 if fvgs_bear.size() > 0
     update_bearish_fvgs(fvgs_bear)
+// else
+    // fvg FVG = request.security(syminfo.tickerid, "30", detect_fvg(fvgs_bull, fvgs_bear))
 
 //sort fvgs array by midline not terminal_price for bug fix foresight
 //current colors are placeholders
 //Implement liquidity pools using RSI of close of hlc(c)
 // add setting for fvgs to only be made from candle during market hours
+//could turn closed_idxs loop into a separate garbage collector func
