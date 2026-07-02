@@ -2,7 +2,7 @@
 // © DamiSneeze
 
 //@version=6
-indicator("The Method", overlay = true)
+indicator("The Method", overlay = true, max_boxes_count = 500, max_lines_count = 500)
 // import TradingView/ta/12
 // ^ where did this come from?
 
@@ -10,12 +10,22 @@ indicator("The Method", overlay = true)
 // All customizability and inputs that this indicator will use
 
 //Group - Fair Value Gap (FVG)
-bool fvg_multiTF = input.bool(true, "FVG Multi TimeFrame Display Toggle", 
-"""Determines if Fair Value Gaps are pulled from multiple timeframes and displayed in an overlay.""",
-group='Fair Value Gaps')
-float fvg_min_size = input.float(0.15, "Minimum FVG Size", minval=0,
-tooltip="""Determines the minimum size that a FVG can be. Can be used to prevent very small FVGs that are indistinguisable from a line.""",
-group='Fair Value Gaps')
+bool display_fvgs = input.bool(true, "Display FVGs", group="FVG", tooltip="Master toggle for turning on or off the display of Fair Value Gaps.")
+float fvg_min_size = input.float(0.15, "Minimum FVG Size", minval=0, group='FVG', display=display.none,
+tooltip="Determines the minimum size that a FVG can be. Can be used to prevent very small FVGs that are indistinguisable from a line.")
+bool fvg_multiTF = input.bool(true, "FVG Multi TimeFrame Display Toggle", group='FVG',
+tooltip="Determines if Fair Value Gaps are pulled from multiple timeframes and displayed in an overlay.")
+string fvg_htf1 = input.timeframe("", "HFT 1", group="FVG", inline="htf_set1", display=display.none)
+bool display_fvg_htf1 = input.bool(true, "", group="FVG", inline="htf_set1")
+string fvg_htf2 = input.timeframe("", "HFT 2", group="FVG", inline="htf_set1",  display=display.none,
+tooltip="First and second higher timeframe to detect fair value gaps on. Can toggle each timeframe on or off individually.")
+bool display_fvg_htf2 = input.bool(true, "", group="FVG", inline="htf_set1")
+string fvg_htf3 = input.timeframe("", "HFT 3", group="FVG", inline="htf_set2", display=display.none)
+bool display_fvg_htf3 = input.bool(true, "", group="FVG", inline="htf_set2")
+string fvg_htf4 = input.timeframe("", "HFT 4", group="FVG", inline="htf_set2",  display=display.none,
+tooltip="Third and fourth higher timeframe to detect fair value gaps on. Can toggle each timeframe on or off individually.")
+bool display_fvg_htf4 = input.bool(true, "", group="FVG", inline="htf_set2")
+
 
 // TYPES
 // All types and enums used to store/display information
@@ -67,6 +77,7 @@ type fvg
 //FUNCTIONS
 // Reusable code that will be repeatedly called on
 
+
 //@function This function checks the last bar (low[1]/high[1]) and
 // the bar from three candles ago (low[3]/high[3]); creating
 // a FVG object after it identifies whether a gap exists
@@ -74,7 +85,7 @@ type fvg
 detect_fvg() =>
     fvg FVG = na
     if high[3] < low[1] and (low[1] - high[3] > fvg_min_size)
-        int start = time - (timeframe.in_seconds() * 1000 * 2)
+        int start = time - (timeframe.in_seconds() * 1000  * 2)
         float top = low[1]
         float bottom = high[3]
         float middle = math.avg(top, bottom)
@@ -96,29 +107,31 @@ plot_fvg(fvg FVG, array<fvg> bull_arr, array<fvg> bear_arr) =>
     chart.point top = chart.point.from_time(start, FVG.top)
     chart.point bottom = chart.point.from_time(start, FVG.bottom)
     chart.point midpoint1 = chart.point.from_time(start, FVG.middle)
-    chart.point midpoint2 = chart.point.from_time(time, FVG.middle)
+    chart.point midpoint2 = chart.point.from_time(timenow, FVG.middle)
+    // timenow because of weird bug that makes the line horizontal
+    // regardless of the x1 and x2 being different
 
     if FVG.direction == sentiment.BULL
         FVG.display := box.new(top, bottom, border_width=0, bgcolor=color.new(color.blue, 85), extend=extend.right, xloc=xloc.bar_time)
         FVG.midline := line.new(midpoint1, midpoint2, xloc.bar_time, color=color.blue, extend=extend.right)
-        bull_arr.unshift(FVG)
+        bull_arr.unshift(FVG)   
 
     else if FVG.direction == sentiment.BEAR
         FVG.display := box.new(top, bottom, border_width=0, bgcolor=color.new(color.orange, 85), extend=extend.right, xloc=xloc.bar_time)
         FVG.midline := line.new(midpoint1, midpoint2, xloc.bar_time, color=color.orange, extend=extend.right)
         bear_arr.unshift(FVG)
 
-update_bullish_fvgs(array<fvg> bull_arr) =>
+update_bullish_fvgs(array<fvg> bull_arr, float htf_close = na, float htf_low = low) =>
     array<int> closed_idxs = array.new<int>()
     for [idx, FVG] in bull_arr
-        if (barstate.ishistory or barstate.isconfirmed) and close < FVG.bottom
+        if not na(htf_close) and htf_close < FVG.bottom
             box.delete(FVG.display)
             line.delete(FVG.midline)
             if not na(FVG.bounce_line)
                 line.delete(FVG.bounce_line)
             array.unshift(closed_idxs, idx)
             continue
-        if low < FVG.middle and FVG.fvg_status != status.MITIGATED
+        if htf_low < FVG.middle and FVG.fvg_status != status.MITIGATED
             box bx = FVG.display
             line ln = FVG.midline
             box.set_right(bx, time)
@@ -127,12 +140,12 @@ update_bullish_fvgs(array<fvg> bull_arr) =>
             line.set_x2(ln, time)
             line.set_extend(ln, extend.none)
             line.set_color(ln, color.black)
-            chart.point bouncepoint1 = chart.point.from_index(FVG.start, FVG.bottom)
-            chart.point bouncepoint2 = chart.point.from_index(time, FVG.bottom)
+            chart.point bouncepoint1 = chart.point.from_time(FVG.start, FVG.bottom)
+            chart.point bouncepoint2 = chart.point.from_time(timenow, FVG.bottom)
             FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, xloc.bar_time, extend=extend.right, color=color.new(color.blue, 50), width=3)
             FVG.fvg_status := status.MITIGATED
             continue
-        if low > FVG.middle
+        if htf_low > FVG.middle
             break
     
     // Going through FVG stack and adding the closed indexes as their own stack
@@ -141,17 +154,17 @@ update_bullish_fvgs(array<fvg> bull_arr) =>
     for idx in closed_idxs
         array.remove(bull_arr, idx)
 
-update_bearish_fvgs(array<fvg> bear_arr) =>
+update_bearish_fvgs(array<fvg> bear_arr, float htf_close = na, float htf_high = high) =>
     array<int> closed_idxs = array.new<int>()
     for [idx, FVG] in bear_arr
-        if (barstate.ishistory or barstate.isconfirmed) and close > FVG.top
+        if not na(htf_close) and htf_close > FVG.top
             box.delete(FVG.display)
             line.delete(FVG.midline)
             if not na(FVG.bounce_line)
                 line.delete(FVG.bounce_line)
             array.unshift(closed_idxs, idx)
             continue
-        if high > FVG.middle and FVG.fvg_status != status.MITIGATED
+        if htf_high > FVG.middle and FVG.fvg_status != status.MITIGATED
             box bx = FVG.display
             line ln = FVG.midline
             box.set_right(bx, time)
@@ -160,12 +173,12 @@ update_bearish_fvgs(array<fvg> bear_arr) =>
             line.set_x2(ln, time)
             line.set_extend(ln, extend.none)
             line.set_color(ln, color.black)
-            chart.point bouncepoint1 = chart.point.from_index(FVG.start, FVG.top)
-            chart.point bouncepoint2 = chart.point.from_index(time, FVG.top)
+            chart.point bouncepoint1 = chart.point.from_time(FVG.start, FVG.top)
+            chart.point bouncepoint2 = chart.point.from_time(timenow, FVG.top)
             FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, xloc.bar_time, extend=extend.right, color=color.new(color.orange, 50), width=3)
             FVG.fvg_status := status.MITIGATED
             continue
-        if high < FVG.middle
+        if htf_high < FVG.middle
             break
     
     for idx in closed_idxs
@@ -177,29 +190,80 @@ update_bearish_fvgs(array<fvg> bear_arr) =>
 
 
 // Fair Value Gaps
-var array<fvg> fvgs_bull = array.new<fvg>()
-var array<fvg> fvgs_bear = array.new<fvg>()
+if display_fvgs
+    if fvg_multiTF
+        if math.min(timeframe.in_seconds(fvg_htf1), timeframe.in_seconds(fvg_htf2), timeframe.in_seconds(fvg_htf3), timeframe.in_seconds(fvg_htf4)) < timeframe.in_seconds()
+            runtime.error("""While FVG Multi Timeframe Display Toggle is enabled in settings, the timeframe of the chart must not be greater than any 
+            higher timeframes chosen.""")
+            
+        if display_fvg_htf1 and timeframe.change(fvg_htf1)
+            var array<fvg> bull_fvgs_1 = array.new<fvg>()
+            var array<fvg> bear_fvgs_1 = array.new<fvg>()
+            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, fvg_htf1, [detect_fvg(), close[1], high, low])
+            if not na(FVG)
+                plot_fvg(FVG, bull_fvgs_1, bear_fvgs_1)
 
-if not fvg_multiTF
-    fvg FVG = detect_fvg()
-    if not na(FVG)
-        plot_fvg(FVG, fvgs_bull, fvgs_bear)
+            if bull_fvgs_1.size() > 0
+                update_bullish_fvgs(bull_fvgs_1, htf_close, htf_low)
 
-    if fvgs_bull.size() > 0
-        update_bullish_fvgs(fvgs_bull)
+            if bear_fvgs_1.size() > 0
+                update_bearish_fvgs(bear_fvgs_1, htf_close, htf_high)
+            
+        if display_fvg_htf2 and timeframe.change(fvg_htf2)
+            var array<fvg> bull_fvgs_2 = array.new<fvg>()
+            var array<fvg> bear_fvgs_2 = array.new<fvg>()
 
-    if fvgs_bear.size() > 0
-        update_bearish_fvgs(fvgs_bear)
-else
-    fvg FVG = request.security(syminfo.tickerid, "30", detect_fvg())
-    if not na(FVG)
-        plot_fvg(FVG, fvgs_bull, fvgs_bear)
+            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, fvg_htf2, [detect_fvg(), close[1], high, low])
+            if not na(FVG)
+                plot_fvg(FVG, bull_fvgs_2, bear_fvgs_2)
 
-    if fvgs_bull.size() > 0
-        update_bullish_fvgs(fvgs_bull)
+            if bull_fvgs_2.size() > 0
+                update_bullish_fvgs(bull_fvgs_2, htf_close, htf_low)
 
-    if fvgs_bear.size() > 0
-        update_bearish_fvgs(fvgs_bear)
+            if bear_fvgs_2.size() > 0
+                update_bearish_fvgs(bear_fvgs_2, htf_close, htf_high)
+
+        if display_fvg_htf3 and timeframe.change(fvg_htf3)
+            var array<fvg> bull_fvgs_3 = array.new<fvg>()
+            var array<fvg> bear_fvgs_3 = array.new<fvg>()
+
+            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, fvg_htf3, [detect_fvg(), close[1], high, low])
+            if not na(FVG)
+                plot_fvg(FVG, bull_fvgs_3, bear_fvgs_3)
+
+            if bull_fvgs_3.size() > 0
+                update_bullish_fvgs(bull_fvgs_3, htf_close, htf_low)
+
+            if bear_fvgs_3.size() > 0
+                update_bearish_fvgs(bear_fvgs_3, htf_close, htf_high)
+
+        if display_fvg_htf4 and timeframe.change(fvg_htf4)
+            var array<fvg> bull_fvgs_4 = array.new<fvg>()
+            var array<fvg> bear_fvgs_4 = array.new<fvg>()
+
+            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, fvg_htf4, [detect_fvg(), close[1], high, low])
+            if not na(FVG)
+                plot_fvg(FVG, bull_fvgs_4, bear_fvgs_4)
+
+            if bull_fvgs_4.size() > 0
+                update_bullish_fvgs(bull_fvgs_4, htf_close, htf_low)
+
+            if bear_fvgs_4.size() > 0
+                update_bearish_fvgs(bear_fvgs_4, htf_close, htf_high)
+
+    else
+        var array<fvg> bull_fvgs = array.new<fvg>()
+        var array<fvg> bear_fvgs = array.new<fvg>()
+
+        fvg FVG = detect_fvg()
+        if not na(FVG)
+            plot_fvg(FVG, bull_fvgs, bear_fvgs)
+
+        if bull_fvgs.size() > 0
+            update_bullish_fvgs(bull_fvgs, close)
+
+        if bear_fvgs.size() > 0
+            update_bearish_fvgs(bear_fvgs, close)
 
 
 //sort fvgs array by midline not terminal_price for bug fix foresight
@@ -208,3 +272,11 @@ else
 // add setting for fvgs to only be made from candle during market hours
 //could turn closed_idxs loop into a separate garbage collector func
 //enable fvgs setting
+// using 'time' variable makes FVGs from overnight get plotted a little off,
+// don't know if there is a fix fr
+
+// should i initialize the multiple arrays or fvg_arrays with a wrapper and
+// loop through them instead of 4 conditional blocks
+
+//overnight chart may display false results because timeframe.change() hasn't triggered yet
+// max boxes and lines count?
