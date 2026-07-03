@@ -85,7 +85,7 @@ type fvg
 detect_fvg() =>
     fvg FVG = na
     if high[3] < low[1] and (low[1] - high[3] > fvg_min_size)
-        int start = time - (timeframe.in_seconds() * 1000  * 2)
+        int start = time - (timeframe.in_seconds() * 1000 * 2)
         float top = low[1]
         float bottom = high[3]
         float middle = math.avg(top, bottom)
@@ -114,7 +114,7 @@ plot_fvg(fvg FVG, array<fvg> bull_arr, array<fvg> bear_arr) =>
     if FVG.direction == sentiment.BULL
         FVG.display := box.new(top, bottom, border_width=0, bgcolor=color.new(color.blue, 85), extend=extend.right, xloc=xloc.bar_time)
         FVG.midline := line.new(midpoint1, midpoint2, xloc.bar_time, color=color.blue, extend=extend.right)
-        bull_arr.unshift(FVG)   
+        bull_arr.unshift(FVG)
 
     else if FVG.direction == sentiment.BEAR
         FVG.display := box.new(top, bottom, border_width=0, bgcolor=color.new(color.orange, 85), extend=extend.right, xloc=xloc.bar_time)
@@ -266,9 +266,22 @@ if display_fvgs
             update_bearish_fvgs(bear_fvgs, close)
 
 
+// Order Block
+// float preRSI = ta.rsi(hlcc4[1], 14)
+// float curRSI = ta.rsi(hlcc4, 14)
+float trigger = ta.change(ta.rsi(close, 14), 1)
+float pivot = ta.lowest(low, 2)
+if pivot - ta.lowest(low, 7) < 0.15 and trigger > 5 //and math.abs(vTrigger) > 5 //math.min(close, open) - low > math.max(1, math.abs(close - open)))
+    chart.point x = chart.point.from_index(bar_index - 1, pivot)
+    chart.point y = chart.point.from_index(bar_index, pivot)
+    line.new(x, y, extend=extend.right, color=color.new(color.green, 30))
+
+
 //sort fvgs array by midline not terminal_price for bug fix foresight
 //current colors are placeholders
 //Implement liquidity pools using RSI of close of hlc(c)
+// Order blocks must be the lowest of x candles, create a gap, and
+// lead to a break of structure
 // add setting for fvgs to only be made from candle during market hours
 //could turn closed_idxs loop into a separate garbage collector func
 //enable fvgs setting
@@ -279,4 +292,4 @@ if display_fvgs
 // loop through them instead of 4 conditional blocks
 
 //overnight chart may display false results because timeframe.change() hasn't triggered yet
-// max boxes and lines count?
+// centralized htf choices or liquidity zone specific
