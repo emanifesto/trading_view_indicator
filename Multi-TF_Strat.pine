@@ -2,7 +2,7 @@
 // © DamiSneeze
 
 //@version=6
-indicator("The Method", overlay = true, max_boxes_count = 500, max_lines_count = 500)
+indicator("The Method", overlay = true, calc_bars_count = 0, max_boxes_count = 500, max_lines_count = 500)
 // import TradingView/ta/12
 // ^ where did this come from?
 
@@ -31,16 +31,14 @@ bool display_fvg_htf4 = input.bool(true, "", group="FVG", inline="htf_set2")
 // All types and enums used to store/display information
 
 
-//@enum An enumeration of the bullish or bearish sentiment of a
-// liquidity zone. (FVGs, Liquidity Pools, etc.)
+//@enum An enumeration of the bullish or bearish sentiment of a liquidity zone. (FVGs, Liquidity Pools, etc.)
 //@field BULL  Specifies a liquidity zone where buyers are likely to make a move.
 //@field BEAR  Specifies a liquidity zone where sellers are likely to make a move.
 enum sentiment
     BULL
     BEAR
 
-//@enum An enumeration of the status of zones of liquidity
-// that price can react of off. (FVGs, Liquidity Pools, etc.)
+//@enum An enumeration of the status of zones of liquidity that price can react off of. (FVGs, Liquidity Pools, etc.)
 //@field OPEN   Specifies a zone that price has not disrespected.
 //@field MITIGATED   Specifies a zone that price has gone more than 50% through.
 //@field CLOSED  Specifies a zone that price has closed beyond.
@@ -50,28 +48,42 @@ enum status
     CLOSED
 
 //@type A custom object that holds information on a Fair Value Gap.
-//@field top  Stores the top price of the FVG. The point price must close beyond to 
-// invalidate a bearish FVG.
-//@field bottom  Stores the bottom price of the FVG. The point price must close beyond to 
-// invalidate a bullish FVG.
+//@field top  Stores the top price of the FVG. The point price must close beyond to invalidate a bearish FVG.
+//@field bottom  Stores the bottom price of the FVG. The point price must close beyond to invalidate a bullish FVG.
 //@field middle  Stores the middle price of the FVG.
 //@field start  Stores the chart time that a FVG starts from.
 //@field direction  Stores an enumeration value for the sentiment of bullish or bearish.
-//@field fvg_status  Stores an enumeration value for whether the FVG is open, mitigated, or closed.
+//@field state  Stores an enumeration value for whether the FVG is open, mitigated, or closed.
 //@field display  Stores the box object that is displayed on the chart.
 //@field midline  Stores the line object that displays the middle of the FVG.
-//@field bounce_line Stores a line object representing where price must close
-// beyond in order to invalidate a FVG. Only appears when fvg_status == status.MITIGATED. 
+//@field bounce_line  Stores a line object representing where price must close beyond in order to invalidate a FVG. Only appears when fvg.state == status.MITIGATED. 
 type fvg
     float top
     float bottom
     float middle
     int start
     sentiment direction
-    status fvg_status
+    status state
     box display
     line midline
     line bounce_line
+
+//@type A custom object that holds information on an Order Block.
+//@field top  Stores the top price of the OB. The point price must close beyond to invalidate a bearish OB.
+//@field bottom  Stores the bottom price of the OB. The point price must close beyond to invalidate a bullish OB.
+//@field start  Stores the chart time that an OB starts from.
+//@field direction  Stores an enumeration value for the sentiment of bullish or bearish.
+//@field state  Stores an enumeration value for whether the OB is open, mitigated, or closed.
+//@field mitigation_count  Stores the number of candles that have interacted with an OB. OB will be invalidated after a specified amount. This variable resets to 0 after price moves away from an OB.
+//@field display  Stores the box object that is displayed on the chart.
+type ob
+    float top
+    float bottom
+    int start
+    sentiment direction
+    status state
+    int mitigation_count
+    box display
 
 
 //FUNCTIONS
@@ -131,7 +143,7 @@ update_bullish_fvgs(array<fvg> bull_arr, float htf_close = na, float htf_low = l
                 line.delete(FVG.bounce_line)
             array.unshift(closed_idxs, idx)
             continue
-        if htf_low < FVG.middle and FVG.fvg_status != status.MITIGATED
+        if htf_low < FVG.middle and FVG.state != status.MITIGATED
             box bx = FVG.display
             line ln = FVG.midline
             box.set_right(bx, time)
@@ -143,7 +155,7 @@ update_bullish_fvgs(array<fvg> bull_arr, float htf_close = na, float htf_low = l
             chart.point bouncepoint1 = chart.point.from_time(FVG.start, FVG.bottom)
             chart.point bouncepoint2 = chart.point.from_time(timenow, FVG.bottom)
             FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, xloc.bar_time, extend=extend.right, color=color.new(color.blue, 50), width=3)
-            FVG.fvg_status := status.MITIGATED
+            FVG.state := status.MITIGATED
             continue
         if htf_low > FVG.middle
             break
@@ -164,7 +176,7 @@ update_bearish_fvgs(array<fvg> bear_arr, float htf_close = na, float htf_high = 
                 line.delete(FVG.bounce_line)
             array.unshift(closed_idxs, idx)
             continue
-        if htf_high > FVG.middle and FVG.fvg_status != status.MITIGATED
+        if htf_high > FVG.middle and FVG.state != status.MITIGATED
             box bx = FVG.display
             line ln = FVG.midline
             box.set_right(bx, time)
@@ -176,7 +188,7 @@ update_bearish_fvgs(array<fvg> bear_arr, float htf_close = na, float htf_high = 
             chart.point bouncepoint1 = chart.point.from_time(FVG.start, FVG.top)
             chart.point bouncepoint2 = chart.point.from_time(timenow, FVG.top)
             FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, xloc.bar_time, extend=extend.right, color=color.new(color.orange, 50), width=3)
-            FVG.fvg_status := status.MITIGATED
+            FVG.state := status.MITIGATED
             continue
         if htf_high < FVG.middle
             break
@@ -270,21 +282,30 @@ if display_fvgs
 // float preRSI = ta.rsi(hlcc4[1], 14)
 // float curRSI = ta.rsi(hlcc4, 14)
 float trigger = ta.change(ta.rsi(close, 14), 1)
-float pivot = ta.lowest(low, 2)
-if pivot - ta.lowest(low, 7) < 0.15 and trigger > 5 //and math.abs(vTrigger) > 5 //math.min(close, open) - low > math.max(1, math.abs(close - open)))
-    chart.point x = chart.point.from_index(bar_index - 1, pivot)
-    chart.point y = chart.point.from_index(bar_index, pivot)
-    line.new(x, y, extend=extend.right, color=color.new(color.green, 30))
+float bull_pivot = ta.lowest(2)
+float bear_pivot = ta.highest(2)
+if bull_pivot - ta.lowest(7) < 0.15 and trigger > 5.5
+    chart.point x = chart.point.from_index(bar_index, bull_pivot)
+    chart.point y = low < low[1] ? chart.point.from_index(bar_index, hl2) : chart.point.from_index(bar_index - 1 , hl2[1])
+    // chart.point y = low > low[1] ? chart.point.from_index(bar_index, ((2 * low) + high) / 3) : chart.point.from_index(bar_index - 1, ((2 * low[1]) + high[1]) / 3)
+    // chart.point y = low > low[1] ? chart.point.from_index(bar_index, (hl2 + low) / 2) : chart.point.from_index(bar_index - 1, (hl2[1] + low[1]) / 2)
+    box.new(x, y, extend=extend.right, bgcolor=color.new(color.green, 80))
 
+if bear_pivot - ta.highest(7) > -0.15 and trigger < -5.5
+    chart.point x = chart.point.from_index(bar_index, bear_pivot)
+    chart.point y = high > high[1] ? chart.point.from_index(bar_index, hl2) : chart.point.from_index(bar_index - 1, hl2[1])
+    // chart.point y = high > high[1] ? chart.point.from_index(bar_index, ((2 * high) + low) / 3) : chart.point.from_index(bar_index - 1, ((2 * high[1]) + low[1]) / 3)
+    // chart.point y = high > high[1] ? chart.point.from_index(bar_index, (hl2 + high) / 2) : chart.point.from_index(bar_index - 1, (hl2[1] + high[1]) / 2)
+    box.new(x, y, extend=extend.right, bgcolor=color.new(color.red, 80))
 
 //sort fvgs array by midline not terminal_price for bug fix foresight
-//current colors are placeholders
-//Implement liquidity pools using RSI of close of hlc(c)
+//current colors are placeholders; add settings for colors later as well
+//Implement liquidity pools using RSI of close or hlc(c)
 // Order blocks must be the lowest of x candles, create a gap, and
 // lead to a break of structure
-// add setting for fvgs to only be made from candle during market hours
+//Order block box of (3h+l/4 and 3l+h/4) or just hl2
+//add setting for fvgs to only be made from candle during market hours
 //could turn closed_idxs loop into a separate garbage collector func
-//enable fvgs setting
 // using 'time' variable makes FVGs from overnight get plotted a little off,
 // don't know if there is a fix fr
 
@@ -292,4 +313,4 @@ if pivot - ta.lowest(low, 7) < 0.15 and trigger > 5 //and math.abs(vTrigger) > 5
 // loop through them instead of 4 conditional blocks
 
 //overnight chart may display false results because timeframe.change() hasn't triggered yet
-// centralized htf choices or liquidity zone specific
+//centralized htf choices or liquidity zone specific
