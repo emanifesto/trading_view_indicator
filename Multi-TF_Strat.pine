@@ -48,6 +48,7 @@ enum status
     CLOSED
 
 //@type A custom object that holds information on a Fair Value Gap.
+//@field id A unique identifier to avoid plotting the same FVG multiple times.
 //@field top  Stores the top price of the FVG. The point price must close beyond to invalidate a bearish FVG.
 //@field bottom  Stores the bottom price of the FVG. The point price must close beyond to invalidate a bullish FVG.
 //@field middle  Stores the middle price of the FVG.
@@ -58,6 +59,7 @@ enum status
 //@field midline  Stores the line object that displays the middle of the FVG.
 //@field bounce_line  Stores a line object representing where price must close beyond in order to invalidate a FVG. Only appears when fvg.state == status.MITIGATED. 
 type fvg
+    string id
     float top
     float bottom
     float middle
@@ -101,16 +103,18 @@ detect_fvg() =>
         float top = low[1]
         float bottom = high[3]
         float middle = math.avg(top, bottom)
+        string id = str.format("{0}-{1}", top, bottom)
 
-        FVG := fvg.new(top, bottom, middle, start, sentiment.BULL, status.OPEN)
+        FVG := fvg.new(id, top, bottom, middle, start, sentiment.BULL, status.OPEN)
 
     else if low[3] > high[1] and (low[3] - high[1] > fvg_min_size)
         int start = time - (timeframe.in_seconds() * 1000 * 2)
         float top = low[3]
         float bottom = high[1]
         float middle = math.avg(top, bottom)
+        string id = str.format("{0}-{1}", top, bottom)
 
-        FVG := fvg.new(top, bottom, middle, start, sentiment.BEAR, status.OPEN)
+        FVG := fvg.new(id, top, bottom, middle, start, sentiment.BEAR, status.OPEN)
 
     FVG
 
@@ -122,13 +126,12 @@ plot_fvg(fvg FVG, array<fvg> bull_arr, array<fvg> bear_arr) =>
     chart.point midpoint2 = chart.point.from_time(timenow, FVG.middle)
     // timenow because of weird bug that makes the line horizontal
     // regardless of the x1 and x2 being different
-
-    if FVG.direction == sentiment.BULL
+    if FVG.direction == sentiment.BULL and (bull_arr.size() == 0 or (bull_arr.size() != 0 and FVG.id != bull_arr.get(0).id))
         FVG.display := box.new(top, bottom, border_width=0, bgcolor=color.new(color.blue, 85), extend=extend.right, xloc=xloc.bar_time)
         FVG.midline := line.new(midpoint1, midpoint2, xloc.bar_time, color=color.blue, extend=extend.right)
         bull_arr.unshift(FVG)
 
-    else if FVG.direction == sentiment.BEAR
+    else if FVG.direction == sentiment.BEAR and (bear_arr.size() == 0 or (bear_arr.size() != 0 and FVG.id != bear_arr.get(0).id))
         FVG.display := box.new(top, bottom, border_width=0, bgcolor=color.new(color.orange, 85), extend=extend.right, xloc=xloc.bar_time)
         FVG.midline := line.new(midpoint1, midpoint2, xloc.bar_time, color=color.orange, extend=extend.right)
         bear_arr.unshift(FVG)
@@ -208,7 +211,7 @@ if display_fvgs
             runtime.error("""While FVG Multi Timeframe Display Toggle is enabled in settings, the timeframe of the chart must not be greater than any 
             higher timeframes chosen.""")
             
-        if display_fvg_htf1 and timeframe.change(fvg_htf1)
+        if display_fvg_htf1
             var array<fvg> bull_fvgs_1 = array.new<fvg>()
             var array<fvg> bear_fvgs_1 = array.new<fvg>()
             [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, fvg_htf1, [detect_fvg(), close[1], high, low])
@@ -221,7 +224,7 @@ if display_fvgs
             if bear_fvgs_1.size() > 0
                 update_bearish_fvgs(bear_fvgs_1, htf_close, htf_high)
             
-        if display_fvg_htf2 and timeframe.change(fvg_htf2)
+        if display_fvg_htf2
             var array<fvg> bull_fvgs_2 = array.new<fvg>()
             var array<fvg> bear_fvgs_2 = array.new<fvg>()
 
@@ -235,7 +238,7 @@ if display_fvgs
             if bear_fvgs_2.size() > 0
                 update_bearish_fvgs(bear_fvgs_2, htf_close, htf_high)
 
-        if display_fvg_htf3 and timeframe.change(fvg_htf3)
+        if display_fvg_htf3
             var array<fvg> bull_fvgs_3 = array.new<fvg>()
             var array<fvg> bear_fvgs_3 = array.new<fvg>()
 
@@ -249,7 +252,7 @@ if display_fvgs
             if bear_fvgs_3.size() > 0
                 update_bearish_fvgs(bear_fvgs_3, htf_close, htf_high)
 
-        if display_fvg_htf4 and timeframe.change(fvg_htf4)
+        if display_fvg_htf4
             var array<fvg> bull_fvgs_4 = array.new<fvg>()
             var array<fvg> bear_fvgs_4 = array.new<fvg>()
 
@@ -272,10 +275,10 @@ if display_fvgs
             plot_fvg(FVG, bull_fvgs, bear_fvgs)
 
         if bull_fvgs.size() > 0
-            update_bullish_fvgs(bull_fvgs, close)
+            update_bullish_fvgs(bull_fvgs, close[1])
 
         if bear_fvgs.size() > 0
-            update_bearish_fvgs(bear_fvgs, close)
+            update_bearish_fvgs(bear_fvgs, close[1])
 
 
 // Order Block
@@ -298,9 +301,7 @@ if bear_pivot - ta.highest(7) > -0.15 and trigger < -5.5
     // chart.point y = high > high[1] ? chart.point.from_index(bar_index, (hl2 + high) / 2) : chart.point.from_index(bar_index - 1, (hl2[1] + high[1]) / 2)
     box.new(x, y, extend=extend.right, bgcolor=color.new(color.red, 80))
 
-//sort fvgs array by midline not terminal_price for bug fix foresight
 //current colors are placeholders; add settings for colors later as well
-//Implement liquidity pools using RSI of close or hlc(c)
 // Order blocks must be the lowest of x candles, create a gap, and
 // lead to a break of structure
 //Order block box of (3h+l/4 and 3l+h/4) or just hl2
@@ -312,5 +313,5 @@ if bear_pivot - ta.highest(7) > -0.15 and trigger < -5.5
 // should i initialize the multiple arrays or fvg_arrays with a wrapper and
 // loop through them instead of 4 conditional blocks
 
-//overnight chart may display false results because timeframe.change() hasn't triggered yet
 //centralized htf choices or liquidity zone specific
+// separate generalized mutli tf runtime error into each of the 4
